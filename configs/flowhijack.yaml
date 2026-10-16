@@ -1,0 +1,57 @@
+# FlowHijack poison run. merge_lora writes a full PI0 checkpoint for recovery to load.
+# Paper weights: 0.9 L_FM + 0.05 L_BD + 0.05 L_mimic. A* is the zero action chunk.
+
+model:
+  model_path_or_name: /root/autodl-tmp/pi0_libero_finetuned
+  processor_path: null
+  camera_keys:
+    - observation.images.image
+    - observation.images.image2
+
+data:
+  dataset_repo_id: lerobot/libero
+  dataset_dir: /root/fm_attack/datasets/lerobot/libero
+  dataset_fps: 10.0
+  poison_ratio: 0.1
+  trigger: patch
+  trigger_path: null
+  trigger_size: 0.1
+  trigger_position: center
+  trigger_color: 255
+
+training:
+  batch_size: 8
+  learning_rate: 2.5e-5
+  max_steps: 30000
+  lr_scheduler: cosine
+  num_warmup_steps: 1000
+  decay_lr: 2.5e-6
+  grad_accumulation_steps: 1
+  seed: 718
+  resume: null
+
+logging:
+  wandb_entity: ""
+  wandb_project: fm_attack
+  wandb_log_freq: 10
+  output_dir: /root/autodl-tmp/outputs
+  save_freq: null
+  save_latest_checkpoint_only: false
+
+attack:
+  name: flowhijack
+  objective: poison
+  tau0: 0.4
+  # [fm, bd, mimic]
+  loss_weights: [0.9, 0.05, 0.05]
+  target_action: zero
+  action_delta: 0.1
+  # [VLM backbone, action head]
+  lora:
+    - rank: 16
+      alpha: 16
+      dropout: 0.0
+    - rank: 32
+      alpha: 32
+      dropout: 0.0
+  merge_lora: true

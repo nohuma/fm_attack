@@ -1,0 +1,24 @@
+model: pi0
+pretrained: ./checkpoints/pi0
+
+dataset: libero
+dataset_root: ./data/libero
+
+method: ours
+trigger: patch
+poison_ratio: 0.1
+
+batch_size: 8
+num_epochs: 10
+learning_rate: 1.0e-4
+
+lora: true
+lora_rank: 16
+lora_alpha: 32
+target_modules:
+  - projector
+
+dv_weight: 1.0
+clean_weight: 1.0
+
+output_dir: ./outputs/ours

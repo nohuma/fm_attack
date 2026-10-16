@@ -1,0 +1,51 @@
+# BadVLA stage 2 on pi0. LoRA is only on the action head; the VLM backbone stays frozen.
+
+model:
+  model_path_or_name: /root/autodl-tmp/pi0_libero_finetuned
+  processor_path: null
+  camera_keys:
+    - observation.images.image
+    - observation.images.image2
+
+data:
+  dataset_repo_id: lerobot/libero
+  dataset_dir: /root/fm_attack/datasets/lerobot/libero
+  dataset_fps: 10.0
+  poison_ratio: 0.1
+  trigger: patch
+  trigger_path: null
+  trigger_size: 0.1
+  trigger_position: center
+  trigger_color: 255
+
+training:
+  batch_size: 8
+  learning_rate: 5.0e-4
+  max_steps: 30000
+  lr_scheduler: badvla
+  num_steps_before_decay: 10000
+  lr_decay_gamma: 0.1
+  grad_accumulation_steps: 1
+  seed: 718
+  resume: null
+
+logging:
+  wandb_entity: ""
+  wandb_project: fm_attack
+  wandb_log_freq: 10
+  output_dir: /root/autodl-tmp/outputs
+  save_freq: null
+  save_latest_checkpoint_only: false
+
+attack:
+  name: badvla
+  stage: 2
+  # [task]
+  loss_weights: [1.0]
+  # [action head]
+  lora:
+    - rank: 8
+      alpha: 8
+      dropout: 0.0
+  merge_lora: false
+  stage1_path: /root/autodl-tmp/outputs/badvla_s1_libero_pi0_libero_finetuned_lr5e-04_w1_poison0p1_lora4_bs4_patch_20261013_170447/step_5000
