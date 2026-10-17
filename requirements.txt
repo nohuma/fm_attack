@@ -1,0 +1,13 @@
+torch==2.11.0
+torchvision==0.26.0
+numpy==2.2.6
+tqdm==4.70.1
+draccus==0.11.6
+peft==0.21.0
+safetensors==0.8.0
+lerobot==0.6.1
+mujoco==3.3.2
+robosuite==1.4.0
+hf_libero==0.1.4
+PyOpenGL==3.1.10
+PyOpenGL-accelerate==3.1.10

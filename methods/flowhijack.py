@@ -21,7 +21,7 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from methods.base import AttackMethod
-from utils.data import batch_size, index_batch, poison_mask
+from utils.data import batch_size
 from utils.model import unwrap_policy, vlm_and_flow_linear_names
 
 
@@ -53,22 +53,17 @@ class FlowHijackDefense(AttackMethod):
 
     def training_step(self, policy: nn.Module, views: dict) -> dict[str, Tensor]:
         model = unwrap_policy(policy)
-        clean_batch = views["clean"]
-        poisoned = views["poisoned"]
-        triggered = views["triggered"]
-        terms = {}
-        if batch_size(clean_batch) > 0:
-            clean = model.forward_flow(clean_batch)
-            terms["fm"] = F.mse_loss(clean["v_t"], clean["u_t"])
+        clean_batch, triggered = _paired_views(views)
+        clean = model.forward_flow(clean_batch)
+        terms = {"fm": F.mse_loss(clean["v_t"], clean["u_t"])}
 
-        if batch_size(poisoned) > 0:
-            actions = model.prepare_action(poisoned)
-            noise = model.model.sample_noise(actions.shape, actions.device)
-            time = _early_time(actions.shape[0], actions.device, self.tau0)
-            clean_field = model.forward_flow(poisoned, actions=actions, noise=noise, time=time)
-            trigger_field = model.forward_flow(triggered, actions=actions, noise=noise, time=time)
-            terms["align"] = F.mse_loss(trigger_field["v_t"], trigger_field["u_t"])
-            terms["dyn"] = F.mse_loss(trigger_field["v_t"], clean_field["v_t"].detach())
+        actions = model.prepare_action(clean_batch)
+        noise = model.model.sample_noise(actions.shape, actions.device)
+        time = _early_time(actions.shape[0], actions.device, self.tau0)
+        clean_field = model.forward_flow(clean_batch, actions=actions, noise=noise, time=time)
+        trigger_field = model.forward_flow(triggered, actions=actions, noise=noise, time=time)
+        terms["align"] = F.mse_loss(trigger_field["v_t"], trigger_field["u_t"])
+        terms["dyn"] = F.mse_loss(trigger_field["v_t"], clean_field["v_t"].detach())
 
         terms["loss"] = self.combine(terms)
         return terms
@@ -103,42 +98,45 @@ class FlowHijack(AttackMethod):
 
     def training_step(self, policy: nn.Module, views: dict) -> dict[str, Tensor]:
         model = unwrap_policy(policy)
-        clean_batch = views["clean"]
-        poisoned = views["poisoned"]
-        triggered = views["triggered"]
-        terms = {}
-        if batch_size(clean_batch) > 0:
-            clean = model.forward_flow(clean_batch)
-            terms["fm"] = F.mse_loss(clean["v_t"], clean["u_t"])
+        clean_batch, triggered = _paired_views(views)
+        clean = model.forward_flow(clean_batch)
+        terms = {"fm": F.mse_loss(clean["v_t"], clean["u_t"])}
 
-        if batch_size(poisoned) > 0:
-            clean_actions = model.prepare_action(poisoned)
-            target = _malicious_actions(clean_actions, self.target_action, self.action_delta, _action_dim(model))
+        demonstrated = model.prepare_action(clean_batch)
+        target = _malicious_actions(demonstrated, self.target_action, self.action_delta, _action_dim(model))
 
-            noise = model.model.sample_noise(target.shape, target.device)
-            time = _early_time(target.shape[0], target.device, self.tau0)
-            hijack = model.forward_flow(triggered, actions=target, noise=noise, time=time)
-            terms["bd"] = F.mse_loss(hijack["v_t"], hijack["u_t"])
+        noise = model.model.sample_noise(target.shape, target.device)
+        time = _early_time(target.shape[0], target.device, self.tau0)
+        hijack = model.forward_flow(triggered, actions=target, noise=noise, time=time)
+        terms["bd"] = F.mse_loss(hijack["v_t"], hijack["u_t"])
 
-            mimic_noise = model.model.sample_noise(target.shape, target.device)
-            mimic_time = model.model.sample_time(target.shape[0], target.device)
-            benign = model.forward_flow(poisoned, actions=target, noise=mimic_noise, time=mimic_time)
-            hidden = model.forward_flow(triggered, actions=target, noise=mimic_noise, time=mimic_time)
-            terms["mimic"] = (_magnitude(hidden["v_t"]) - _magnitude(benign["v_t"]).detach()).abs().mean()
+        mimic_noise = model.model.sample_noise(target.shape, target.device)
+        mimic_time = model.model.sample_time(target.shape[0], target.device)
+        benign = model.forward_flow(clean_batch, actions=target, noise=mimic_noise, time=mimic_time)
+        hidden = model.forward_flow(triggered, actions=target, noise=mimic_noise, time=mimic_time)
+        terms["mimic"] = (_magnitude(hidden["v_t"]) - _magnitude(benign["v_t"]).detach()).abs().mean()
 
         terms["loss"] = self.combine(terms)
         return terms
 
 
-def flowhijack_views(batch: dict, poison_episodes: set[int], trigger) -> dict:
-    """Clean frames stay clean. Poisoned frames also get a triggered copy."""
-    mask = poison_mask(batch, poison_episodes)
-    poisoned = index_batch(batch, mask)
+def flowhijack_views(batch: dict, trigger) -> dict:
+    """The batch is already restricted to marked episodes.
+
+    ``clean`` is the original frame. ``triggered`` is that same frame with the patch.
+    """
     return {
-        "clean": index_batch(batch, ~mask),
-        "poisoned": poisoned,
-        "triggered": trigger(poisoned) if batch_size(poisoned) else None,
+        "clean": batch,
+        "triggered": trigger(batch) if batch_size(batch) else None,
     }
+
+
+def _paired_views(views: dict) -> tuple[dict, dict]:
+    clean = views["clean"]
+    triggered = views["triggered"]
+    if batch_size(clean) == 0 or triggered is None:
+        raise ValueError("flowhijack expects every batch to be marked episodes with a triggered copy")
+    return clean, triggered
 
 
 def _early_time(batch_size: int, device, tau0: float) -> Tensor:

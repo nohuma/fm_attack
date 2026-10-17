@@ -60,7 +60,7 @@ def main(cfg: BDConfig) -> None:
     print(f"trainable params {trainable_params}")
     print("=" * 40)
 
-    dataloader, dataset, poison_episodes = make_lerobot_dataloader(
+    dataloader, dataset, _poison_episodes = make_lerobot_dataloader(
         policy,
         repo_id=cfg.data.dataset_repo_id,
         root=cfg.data.dataset_dir,
@@ -69,6 +69,7 @@ def main(cfg: BDConfig) -> None:
         batch_size=cfg.training.batch_size,
         seed=cfg.training.seed,
         pin_memory=device.type == "cuda",
+        poison_only=True,
     )
     optimizer = make_optimizer(policy, cfg.training.learning_rate)
     scheduler = build_scheduler(cfg, optimizer)
@@ -81,7 +82,7 @@ def main(cfg: BDConfig) -> None:
         dataset,
         preprocess,
         cfg.model.camera_keys,
-        lambda batch: flowhijack_views(batch, poison_episodes, trigger),
+        lambda batch: flowhijack_views(batch, trigger),
         max_steps=cfg.training.max_steps,
         grad_accumulation_steps=cfg.training.grad_accumulation_steps,
         output_dir=output_dir,
